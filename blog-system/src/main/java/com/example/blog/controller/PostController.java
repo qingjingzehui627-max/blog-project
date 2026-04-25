@@ -17,8 +17,11 @@ public class PostController {
     private PostService postService;
 
     @GetMapping
-    public ResponseEntity<?> getPosts(@RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "10") int size) {
-        List<Post> posts = postService.getPosts(page, size);
+    public ResponseEntity<?> getPosts(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String keyword) {
+        List<Post> posts = postService.getPosts(page, size, keyword);
         return ResponseEntity.ok(posts);
     }
 

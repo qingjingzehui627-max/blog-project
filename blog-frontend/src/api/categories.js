@@ -1,3 +1,13 @@
-import request from './request'
+export const getCategories = async () => {
+  const response = await fetch('/api/categories', {
+    headers: {
+      Accept: 'application/json'
+    }
+  })
 
-export const getCategories = () => request.get('/categories')
+  if (!response.ok) {
+    throw new Error('Failed to fetch categories')
+  }
+
+  return response.json()
+}

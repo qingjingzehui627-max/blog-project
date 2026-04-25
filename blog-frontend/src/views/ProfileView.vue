@@ -20,9 +20,24 @@
 
         <div class="px-8 pb-6 -mt-10">
           <!-- Avatar -->
+          <input ref="avatarInput" type="file" accept="image/*" class="hidden" @change="handleAvatarChange" />
           <div class="flex items-end justify-between mb-4">
-            <div class="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white text-3xl font-bold shadow-lg border-4 border-white">
-              {{ user.username?.[0]?.toUpperCase() }}
+            <div
+              class="w-20 h-20 rounded-2xl shadow-lg border-4 border-white overflow-hidden relative"
+              :class="isOwnProfile ? 'cursor-pointer group' : ''"
+              @click="isOwnProfile && avatarInput.click()"
+            >
+              <img v-if="user.avatar" :src="user.avatar" class="w-full h-full object-cover" />
+              <div v-else class="w-full h-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white text-3xl font-bold">
+                {{ user.username?.[0]?.toUpperCase() }}
+              </div>
+              <div v-if="isOwnProfile" class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                <span v-if="uploadingAvatar" class="text-white text-xs">上传中...</span>
+                <svg v-else class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+              </div>
             </div>
             <div v-if="isOwnProfile" class="mb-1">
               <button
@@ -126,6 +141,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { getUserById, updateProfile, getPostsByUser } from '../api/users'
+import { uploadImage } from '../api/upload'
 import PostCard from '../components/PostCard.vue'
 
 const route = useRoute()
@@ -138,6 +154,8 @@ const postsLoading = ref(true)
 const editing = ref(false)
 const saving = ref(false)
 const editBio = ref('')
+const avatarInput = ref(null)
+const uploadingAvatar = ref(false)
 
 const isOwnProfile = computed(() =>
   auth.isLoggedIn && auth.user && auth.user.id === user.value?.id
@@ -176,6 +194,21 @@ async function saveEdit() {
     editing.value = false
   } finally {
     saving.value = false
+  }
+}
+
+async function handleAvatarChange(e) {
+  const file = e.target.files?.[0]
+  if (!file) return
+  uploadingAvatar.value = true
+  try {
+    const url = await uploadImage(file)
+    const updated = await updateProfile({ avatar: url })
+    user.value = updated
+    if (auth.user) auth.user.avatar = updated.avatar
+  } finally {
+    uploadingAvatar.value = false
+    e.target.value = ''
   }
 }
 

@@ -44,12 +44,14 @@ public class SecurityConfig {
                 .antMatchers("/api/auth/**").permitAll()
                 .antMatchers("/api/posts").permitAll()
                 .antMatchers("/api/posts/**").permitAll()
+                .antMatchers(org.springframework.http.HttpMethod.GET, "/api/categories/**").permitAll()
                 .antMatchers("/api/comments/**").permitAll()
                 .antMatchers("/api/upload/**").permitAll()
                 .antMatchers("/api/like/count").permitAll()
                 .antMatchers("/uploads/**").permitAll()
                 .antMatchers(org.springframework.http.HttpMethod.GET, "/api/user/*").permitAll()
                 .antMatchers("/api/posts/user/**").permitAll()
+                .antMatchers(org.springframework.http.HttpMethod.GET, "/api/ai/config").permitAll()
                 .anyRequest().authenticated();
 
         // 添加JWT过滤器
