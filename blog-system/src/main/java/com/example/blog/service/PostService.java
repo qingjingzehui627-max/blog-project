@@ -6,7 +6,7 @@ import com.example.blog.entity.Post;
 import java.util.List;
 
 public interface PostService extends IService<Post> {
-    List<Post> getPosts(int page, int size);
+    List<Post> getPosts(int page, int size, String keyword);
     List<Post> getPostsByUser(Long userId);
     Post getPostById(Long id);
     void createPost(Post post);

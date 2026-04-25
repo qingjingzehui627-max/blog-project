@@ -2,6 +2,43 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-blue-50 text-gray-800;
+@layer base {
+  :root {
+    --qing-primary: #6366f1;
+    --qing-secondary: #8b5cf6;
+    --qing-surface: #f5f7ff;
+    --qing-surface-strong: #eef2ff;
+    --qing-border: #d9dcff;
+    --qing-text: #312e81;
+  }
+
+  html,
+  body,
+  #app {
+    min-height: 100%;
+  }
+
+  body {
+    background:
+      radial-gradient(circle at top left, rgba(139, 92, 246, 0.10), transparent 28%),
+      radial-gradient(circle at top right, rgba(99, 102, 241, 0.10), transparent 26%),
+      linear-gradient(180deg, #f6f7ff 0%, #f8fbff 100%);
+    @apply text-slate-900 antialiased;
+    transition: background-color 0.25s ease, color 0.25s ease;
+  }
+
+  a {
+    @apply text-inherit no-underline;
+  }
+
+  ::selection {
+    background: #ddd6fe;
+    color: var(--qing-text);
+  }
+}
+
+@layer utilities {
+  .gradient-brand {
+    background-image: linear-gradient(90deg, var(--qing-primary) 0%, var(--qing-secondary) 100%);
+  }
 }

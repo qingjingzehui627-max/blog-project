@@ -5,6 +5,7 @@ import com.example.blog.entity.Post;
 import com.example.blog.mapper.PostMapper;
 import com.example.blog.service.PostService;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -13,11 +14,20 @@ import java.util.List;
 public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements PostService {
 
     @Override
-    public List<Post> getPosts(int page, int size) {
-        return baseMapper.selectList(
+    public List<Post> getPosts(int page, int size, String keyword) {
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Post> queryWrapper =
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Post>()
-                        .orderByDesc(Post::getCreatedAt)
-                        .last("LIMIT " + (page - 1) * size + ", " + size)
+                        .orderByDesc(Post::getCreatedAt);
+
+        if (StringUtils.hasText(keyword)) {
+            queryWrapper.and(wrapper -> wrapper
+                    .like(Post::getTitle, keyword)
+                    .or()
+                    .like(Post::getContent, keyword));
+        }
+
+        return baseMapper.selectList(
+                queryWrapper.last("LIMIT " + (page - 1) * size + ", " + size)
         );
     }
 
