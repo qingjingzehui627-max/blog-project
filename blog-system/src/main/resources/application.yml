@@ -7,7 +7,7 @@ spring:
   redis:
     host: localhost
     port: 6379
-    password: 
+    password:
     database: 0
   servlet:
     multipart:
@@ -41,3 +41,34 @@ ai:
   daily-limit: 10
   max-history: 10
   timeout-ms: 30000
+
+guardian:
+  enabled: true
+  base-url: https://content.guardianapis.com
+  # Guardian API Key，建议生产环境通过环境变量 GUARDIAN_API_KEY 配置
+  api-key: e5e3f364-a229-49b5-947c-28f44a9fa8a3
+  timeout-ms: 20000
+  page-size: 50
+  top-limit: 100
+  max-pages-per-query: 2
+  # 单次请求之间的间隔，单位毫秒
+  request-interval-ms: 1200
+  # 定时任务 cron 表达式，当前表示每天 06:10 执行
+  cron: 0 10 6 * * ?
+  # 定时任务执行时区
+  zone: Asia/Shanghai
+  # 抓取日期偏移量，-1 表示抓取前一天新闻
+  fetch-offset-days: -1
+  default-category-code: GENERAL_TECH
+  default-category-name: 科技综合
+  sections:
+    - technology
+    - science
+    - business
+  queries:
+    - artificial intelligence
+    - machine learning
+    - OpenAI
+    - Anthropic
+    - Nvidia
+    - technology

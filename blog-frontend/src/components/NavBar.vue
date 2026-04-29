@@ -11,6 +11,12 @@
       </RouterLink>
 
       <div class="hidden items-center gap-2 pl-1 lg:flex">
+        <RouterLink to="/news" class="inline-flex h-11 items-center gap-2 whitespace-nowrap rounded-2xl px-4 text-[15px] font-semibold text-slate-700 transition hover:bg-white hover:text-[#6366f1] hover:shadow-[0_10px_24px_rgba(99,102,241,0.14)]">
+          <svg class="h-4 w-4 text-slate-500 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M19 5H5a2 2 0 00-2 2v10a2 2 0 002 2h14a2 2 0 002-2V7a2 2 0 00-2-2zm0 4-7 5-7-5" />
+          </svg>
+          <span>AI 新闻</span>
+        </RouterLink>
         <RouterLink to="/links" class="inline-flex h-11 items-center gap-2 whitespace-nowrap rounded-2xl px-4 text-[15px] font-semibold text-slate-700 transition hover:bg-white hover:text-[#6366f1] hover:shadow-[0_10px_24px_rgba(99,102,241,0.14)]">
           <svg class="h-4 w-4 text-slate-500 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M10 14L8 16a3 3 0 11-4-4l2-2m8-4l2-2a3 3 0 114 4l-2 2M9 15l6-6" />
@@ -50,6 +56,13 @@
       </form>
 
       <div class="flex items-center gap-2">
+        <RouterLink
+          v-if="auth.isLoggedIn"
+          to="/news-admin"
+          class="hidden h-10 items-center rounded-[18px] border-2 border-[#c7cbff] bg-white px-3.5 text-sm font-bold text-slate-700 shadow-[0_10px_24px_rgba(99,102,241,0.08)] transition hover:border-[#6366f1] hover:text-[#4f46e5] md:inline-flex"
+        >
+          新闻后台
+        </RouterLink>
         <button
           type="button"
           @click="toggleTheme"

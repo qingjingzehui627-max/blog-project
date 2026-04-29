@@ -278,6 +278,21 @@
                 <p class="text-xs text-slate-400">点赞量</p>
               </div>
             </div>
+            <div class="mt-4 space-y-2 rounded-2xl border border-[#d9dcff] bg-[linear-gradient(180deg,#f8f9ff_0%,#ffffff_100%)] p-3">
+              <RouterLink
+                to="/news"
+                class="inline-flex w-full items-center justify-center rounded-xl border border-[#d9dcff] bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-[#6366f1] hover:text-[#4f46e5]"
+              >
+                浏览 AI 新闻
+              </RouterLink>
+              <RouterLink
+                v-if="auth.isLoggedIn"
+                to="/news-admin"
+                class="inline-flex w-full items-center justify-center rounded-xl bg-[linear-gradient(90deg,#4f46e5_0%,#8b5cf6_100%)] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(99,102,241,0.18)] transition hover:opacity-90"
+              >
+                进入新闻后台
+              </RouterLink>
+            </div>
           </section>
 
           <section class="rounded-xl border border-slate-200 bg-white p-4">

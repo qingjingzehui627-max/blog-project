@@ -2,6 +2,9 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 const routes = [
   { path: '/', component: () => import('../views/HomeView.vue') },
+  { path: '/news', component: () => import('../views/NewsListView.vue') },
+  { path: '/news/:id', component: () => import('../views/NewsDetailView.vue') },
+  { path: '/news-admin', component: () => import('../views/NewsAdminView.vue'), meta: { auth: true } },
   { path: '/links', component: () => import('../views/LinksView.vue') },
   { path: '/about', component: () => import('../views/AboutView.vue') },
   { path: '/login', component: () => import('../views/LoginView.vue') },
