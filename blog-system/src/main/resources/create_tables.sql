@@ -90,3 +90,85 @@ INSERT INTO categories (name) VALUES ('技术'), ('生活'), ('工作'), ('学�
 
 -- 插入默认标签
 INSERT INTO tags (name) VALUES ('Java'), ('Spring Boot'), ('Vue'), ('MySQL'), ('Redis') ON DUPLICATE KEY UPDATE name = name;
+
+-- AI tech news aggregation module
+CREATE TABLE IF NOT EXISTS news_articles (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    source VARCHAR(32) NOT NULL DEFAULT 'guardian',
+    source_content_id VARCHAR(255) NOT NULL,
+    section_id VARCHAR(100),
+    section_name VARCHAR(100),
+    pillar_id VARCHAR(100),
+    pillar_name VARCHAR(100),
+    title VARCHAR(500) NOT NULL,
+    summary TEXT,
+    content MEDIUMTEXT,
+    author VARCHAR(255),
+    web_url VARCHAR(500) NOT NULL,
+    api_url VARCHAR(500),
+    thumbnail_url VARCHAR(500),
+    published_at DATETIME NOT NULL,
+    fetch_date DATE NOT NULL,
+    rank_order INT,
+    category_code VARCHAR(50) NOT NULL,
+    category_name VARCHAR(100) NOT NULL,
+    keyword_tags VARCHAR(500),
+    lang VARCHAR(20) DEFAULT 'en',
+    status TINYINT NOT NULL DEFAULT 1,
+    raw_json JSON,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_source_content (source, source_content_id),
+    KEY idx_fetch_date_rank (fetch_date, rank_order),
+    KEY idx_category_date (category_code, fetch_date),
+    KEY idx_published_at (published_at),
+    KEY idx_status_published (status, published_at)
+);
+
+CREATE TABLE IF NOT EXISTS news_fetch_job_log (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    source VARCHAR(32) NOT NULL,
+    job_date DATE NOT NULL,
+    trigger_type VARCHAR(20) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    request_count INT NOT NULL DEFAULT 0,
+    fetched_count INT NOT NULL DEFAULT 0,
+    inserted_count INT NOT NULL DEFAULT 0,
+    updated_count INT NOT NULL DEFAULT 0,
+    failed_count INT NOT NULL DEFAULT 0,
+    started_at DATETIME NOT NULL,
+    finished_at DATETIME,
+    error_message TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_source_job_date (source, job_date),
+    KEY idx_status_started_at (status, started_at)
+);
+
+CREATE TABLE IF NOT EXISTS news_category_rules (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    category_code VARCHAR(50) NOT NULL,
+    category_name VARCHAR(100) NOT NULL,
+    include_keywords TEXT NOT NULL,
+    exclude_keywords TEXT,
+    priority INT NOT NULL DEFAULT 100,
+    enabled TINYINT NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_category_code (category_code)
+);
+
+INSERT INTO news_category_rules (category_code, category_name, include_keywords, exclude_keywords, priority, enabled)
+VALUES
+('MODEL', '大模型', 'openai,gpt,anthropic,claude,gemini,llama,large language model,llm,foundation model', '', 10, 1),
+('RESEARCH', 'AI研究', 'research,paper,benchmark,multimodal,reasoning,agentic,training,alignment', '', 20, 1),
+('CHIP', '算力芯片', 'nvidia,gpu,semiconductor,chip,cuda,datacenter,inference chip', '', 30, 1),
+('PRODUCT', 'AI产品', 'copilot,assistant,chatbot,ai tool,product launch,release', '', 40, 1),
+('POLICY', '政策监管', 'regulation,regulator,law,privacy,copyright,safety,governance', '', 50, 1),
+('STARTUP', '投融资', 'startup,funding,investment,venture capital,acquisition,merger', '', 60, 1),
+('GENERAL_TECH', '科技综合', 'technology,software,cloud,developer,platform,app', '', 90, 1)
+ON DUPLICATE KEY UPDATE
+category_name = VALUES(category_name),
+include_keywords = VALUES(include_keywords),
+exclude_keywords = VALUES(exclude_keywords),
+priority = VALUES(priority),
+enabled = VALUES(enabled);
