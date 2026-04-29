@@ -1,0 +1,20 @@
+# Ignore everything by default
+*
+
+# Keep this file and Git metadata helpers
+!.gitignore
+
+# Allow the two project directories
+!blog-frontend/
+!blog-system/
+
+# Re-include all files under the allowed directories
+!blog-frontend/**
+!blog-system/**
+
+# Exclude generated/dependency directories inside blog-frontend
+blog-frontend/dist/
+blog-frontend/node_modules/
+
+# Exclude build output inside blog-system
+blog-system/target/
