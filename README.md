@@ -26,6 +26,7 @@
 * MyBatis-Plus
 * Spring Security + JWT
 * OpenAI API / Spring AI
+* 定时任务 @Scheduled
 
 ### 🗄️ 数据库
 
@@ -86,6 +87,11 @@
 * 搜索增强回答
 * 内容辅助生成（可扩展）
 
+### 🔍 全球热点新闻资讯
+* 多数据源AI新闻抓取
+* 新闻分类，去重
+* 新闻管理后台
+* 新闻抓取定时任务
 ---
 
 ## 📡 核心接口示例
@@ -118,6 +124,16 @@ POST /api/upload/image
 
 ```
 POST /api/ai/chat
+```
+
+### 📤 新闻资讯接口
+
+```
+GET /api/news
+GET /api/news/top
+GET /api/news/categories
+GET /api/admin/news/rules
+POST /api/admin/news/fetch
 ```
 ---
 
@@ -162,6 +178,7 @@ npm run dev
 | 收藏功能 | ✅  |
 | 分类标签 | ✅  |
 | AI智能体 | ✅  | 
+| 全球新闻资讯 | ✅  | 
 | 搜索功能 | ⏳  |
 | 视频上传 | ⏳  |
 
@@ -170,7 +187,7 @@ npm run dev
 
 | 模块   | 状态 |
 | ---- | -- |
-| AI智能体 | ✅  | 
+| 全球新闻资讯 | ✅  | 
 
 ## 🔥 后续规划
 
@@ -191,6 +208,7 @@ npm run dev
 * ⚡ Redis 提升性能（缓存 / 计数）
 * 🧩 模块清晰，易扩展
 * 🔍 AI智能助手博客内容问答
+* 🔍 多数据源定时抓取全球热点新闻资讯
 
 ---
 
