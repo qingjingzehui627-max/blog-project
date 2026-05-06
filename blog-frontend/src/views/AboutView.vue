@@ -94,7 +94,7 @@
 </template>
 
 <script setup>
-const avatarSrc = '/uploads/image/f96385ad-b645-41b6-9c9d-3567c715ee0a.png'
+const avatarSrc = '/about-avatar.png'
 
 const stackGroups = [
   {
