@@ -27,6 +27,6 @@ public class GuardianNewsFetchJob {
     public void fetchDailyNews() {
         // 根据偏移量计算本次需要抓取的新闻日期
         LocalDate targetDate = LocalDate.now().plusDays(guardianProperties.getFetchOffsetDays());
-        guardianNewsFetchService.fetchNews(targetDate, "SCHEDULED");
+        guardianNewsFetchService.fetchNews(targetDate, "SCHEDULED", null);
     }
 }

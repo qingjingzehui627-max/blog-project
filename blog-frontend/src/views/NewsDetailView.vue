@@ -16,7 +16,7 @@
 
       <div class="mt-6 flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#6366f1]">
         <span>{{ article.categoryName }}</span>
-        <span class="text-slate-300">•</span>
+        <span class="text-slate-300">/</span>
         <span class="text-slate-400 normal-case tracking-normal">{{ formatDateTime(article.publishedAt) }}</span>
       </div>
 
@@ -25,8 +25,8 @@
       </h1>
 
       <div class="mt-4 flex flex-wrap items-center gap-4 text-sm text-slate-500">
-        <span>{{ article.author || 'Guardian' }}</span>
-        <span>{{ article.sectionName || 'Technology' }}</span>
+        <span>{{ article.author || article.primaryProvider || '新闻来源' }}</span>
+        <span>{{ article.sectionName || '-' }}</span>
         <span>Top {{ article.rankOrder || '-' }}</span>
       </div>
 
@@ -37,9 +37,33 @@
         <img :src="article.thumbnailUrl" :alt="article.title" class="max-h-[420px] w-full object-cover" />
       </div>
 
-      <p v-if="article.summary" class="mt-8 rounded-[24px] bg-[#f7f8ff] px-5 py-4 text-[16px] leading-8 text-slate-700">
-        {{ article.summary }}
-      </p>
+      <section
+        v-if="aiSummary?.summaryText"
+        class="mt-8 rounded-[28px] border border-[#d7e3ff] bg-[linear-gradient(135deg,#eef4ff_0%,#f8faff_100%)] px-5 py-5"
+      >
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.18em] text-[#4f46e5]">AI Summary</p>
+            <h2 class="mt-2 text-lg font-bold text-slate-900">AI 摘要</h2>
+          </div>
+          <span class="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-500">
+            {{ aiSummary.summaryStatus || 'SUCCESS' }}
+          </span>
+        </div>
+        <p class="mt-4 text-[16px] leading-8 text-slate-700">
+          {{ aiSummary.summaryText }}
+        </p>
+        <p class="mt-3 text-xs text-slate-400">
+          生成时间：{{ formatDateTime(aiSummary.generatedAt) }} / 模型：{{ aiSummary.modelName || '-' }}
+        </p>
+      </section>
+
+      <section v-if="article.summary" class="mt-8 rounded-[24px] bg-[#f7f8ff] px-5 py-4">
+        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Source Summary</p>
+        <p class="mt-3 text-[16px] leading-8 text-slate-700">
+          {{ article.summary }}
+        </p>
+      </section>
 
       <div class="mt-8 space-y-5 text-[16px] leading-8 text-slate-700">
         <p v-for="(paragraph, index) in contentParagraphs" :key="index">
@@ -54,8 +78,17 @@
           rel="noreferrer"
           class="inline-flex items-center rounded-2xl bg-[linear-gradient(90deg,#4f46e5_0%,#8b5cf6_100%)] px-4 py-3 text-sm font-semibold text-white shadow-[0_12px_24px_rgba(99,102,241,0.2)] transition hover:opacity-90"
         >
-          打开 Guardian 原文
+          打开原文
         </a>
+        <button
+          v-if="auth.isLoggedIn"
+          type="button"
+          class="inline-flex items-center rounded-2xl border border-[#d9dcff] bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-[#6366f1] hover:text-[#4f46e5] disabled:cursor-not-allowed disabled:opacity-50"
+          :disabled="summarySubmitting"
+          @click="handleGenerateSummary"
+        >
+          {{ summarySubmitting ? '生成中...' : (aiSummary?.summaryText ? '重新生成 AI 摘要' : '生成 AI 摘要') }}
+        </button>
         <RouterLink
           v-if="auth.isLoggedIn"
           to="/news-admin"
@@ -64,6 +97,10 @@
           进入新闻后台
         </RouterLink>
       </div>
+
+      <p v-if="summaryMessage" class="mt-4 rounded-2xl bg-[#f8fafc] px-4 py-3 text-sm text-slate-600">
+        {{ summaryMessage }}
+      </p>
     </article>
 
     <aside class="space-y-4">
@@ -86,6 +123,10 @@
             <dt class="text-slate-400">作者</dt>
             <dd class="text-right font-medium text-slate-700">{{ article.author || '-' }}</dd>
           </div>
+          <div class="flex items-start justify-between gap-4">
+            <dt class="text-slate-400">AI 状态</dt>
+            <dd class="text-right font-medium text-slate-700">{{ aiSummary?.summaryStatus || '未生成' }}</dd>
+          </div>
         </dl>
       </section>
 
@@ -106,8 +147,7 @@
   </div>
 
   <div v-else class="rounded-[28px] border border-[#d9dcff] bg-white px-6 py-16 text-center shadow-[0_16px_38px_rgba(99,102,241,0.08)]">
-    <div class="text-5xl">🧭</div>
-    <p class="mt-4 text-lg font-semibold text-slate-800">新闻不存在或已下线</p>
+    <p class="text-lg font-semibold text-slate-800">新闻不存在或已下线</p>
     <p v-if="errorText" class="mt-2 text-sm text-slate-400">{{ errorText }}</p>
     <RouterLink to="/news" class="mt-4 inline-flex items-center rounded-2xl bg-[linear-gradient(90deg,#4f46e5_0%,#8b5cf6_100%)] px-4 py-3 text-sm font-semibold text-white">
       返回新闻列表
@@ -118,18 +158,23 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { getNewsDetail } from '../api/news'
+import { generateNewsSummary, getNewsDetail } from '../api/news'
 import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
 const auth = useAuthStore()
 
 const loading = ref(false)
-const article = ref(null)
+const summarySubmitting = ref(false)
+const detail = ref(null)
 const errorText = ref('')
+const summaryMessage = ref('')
+
+const article = computed(() => detail.value?.article || null)
+const aiSummary = computed(() => detail.value?.aiSummary || null)
 
 const keywordTags = computed(() =>
-  (article.value?.keywordTags || '')
+  ((article.value?.keywordTags || ''))
     .split(',')
     .map(item => item.trim())
     .filter(Boolean)
@@ -150,9 +195,9 @@ async function loadDetail() {
   loading.value = true
   errorText.value = ''
   try {
-    article.value = await getNewsDetail(route.params.id)
+    detail.value = await getNewsDetail(route.params.id)
   } catch (error) {
-    article.value = null
+    detail.value = null
     errorText.value = error.response?.data?.message || '新闻详情加载失败'
   } finally {
     loading.value = false
@@ -160,10 +205,33 @@ async function loadDetail() {
 }
 
 /**
+ * 手动生成单条新闻摘要。
+ */
+async function handleGenerateSummary() {
+  if (!article.value) return
+  summarySubmitting.value = true
+  summaryMessage.value = ''
+  try {
+    const result = await generateNewsSummary(article.value.id, {
+      force: aiSummary.value?.summaryText ? true : false
+    })
+    summaryMessage.value = result?.message || '摘要生成完成'
+    await loadDetail()
+  } catch (error) {
+    summaryMessage.value = error.response?.data?.message || '摘要生成失败'
+  } finally {
+    summarySubmitting.value = false
+  }
+}
+
+/**
  * 格式化完整时间。
+ *
+ * @param {string} dateText 时间文本
+ * @returns {string}
  */
 function formatDateTime(dateText) {
-  if (!dateText) return '未知时间'
+  if (!dateText) return '-'
   return new Date(dateText).toLocaleString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
@@ -175,6 +243,9 @@ function formatDateTime(dateText) {
 
 /**
  * 格式化日期。
+ *
+ * @param {string} dateText 日期文本
+ * @returns {string}
  */
 function formatDateOnly(dateText) {
   if (!dateText) return '-'

@@ -19,6 +19,10 @@ blog-frontend/node_modules/
 # Exclude build output inside blog-system
 blog-system/target/
 
+# Exclude local runtime logs
+blog-frontend/*.log
+blog-system/*.log
+
 #服务器配置
 node_modules
 
@@ -26,3 +30,6 @@ blog-frontend/Dockerfile
 blog-frontend/nginx.conf
 blog-system/Dockerfile
 blog-system/src/main/resources/application-server.yml
+
+# Exclude local secret config for blog-system
+blog-system/src/main/resources/application-local-secrets.yml

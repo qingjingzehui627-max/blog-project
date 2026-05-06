@@ -1,6 +1,8 @@
 package com.example.blog.controller;
 
+import com.example.blog.dto.NewsArticleDetailResponse;
 import com.example.blog.entity.NewsArticle;
+import com.example.blog.service.NewsAiSummaryService;
 import com.example.blog.service.NewsArticleService;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -22,6 +24,9 @@ public class NewsController {
 
     @Resource
     private NewsArticleService newsArticleService;
+
+    @Resource
+    private NewsAiSummaryService newsAiSummaryService;
 
     /**
      * 分页查询新闻列表。
@@ -83,6 +88,9 @@ public class NewsController {
         if (article == null) {
             return ResponseEntity.notFound().build();
         }
-        return ResponseEntity.ok(article);
+        NewsArticleDetailResponse response = new NewsArticleDetailResponse();
+        response.setArticle(article);
+        response.setAiSummary(newsAiSummaryService.getSummaryByArticleId(id));
+        return ResponseEntity.ok(response);
     }
 }
