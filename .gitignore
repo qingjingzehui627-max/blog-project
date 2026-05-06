@@ -18,3 +18,11 @@ blog-frontend/node_modules/
 
 # Exclude build output inside blog-system
 blog-system/target/
+
+#服务器配置
+node_modules
+
+blog-frontend/Dockerfile
+blog-frontend/nginx.conf
+blog-system/Dockerfile
+blog-system/src/main/resources/application-server.yml
