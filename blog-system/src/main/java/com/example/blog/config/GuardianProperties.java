@@ -8,7 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Guardian 新闻抓取模块配置。
+ * Guardian 新闻抓取配置。
  */
 @Data
 @Component

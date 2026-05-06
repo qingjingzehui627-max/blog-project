@@ -1,39 +1,32 @@
 package com.example.blog.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.example.blog.classifier.NewsClassifier;
-import com.example.blog.client.GuardianApiClient;
-import com.example.blog.client.dto.GuardianSearchResponse;
+import com.example.blog.client.provider.NewsProviderAdapter;
+import com.example.blog.client.provider.dto.NewsProviderFetchResult;
 import com.example.blog.config.GuardianProperties;
-import com.example.blog.entity.NewsArticle;
+import com.example.blog.dto.NewsProviderStatusResponse;
 import com.example.blog.entity.NewsFetchJobLog;
-import com.example.blog.mapper.NewsArticleMapper;
 import com.example.blog.mapper.NewsFetchJobLogMapper;
 import com.example.blog.service.GuardianNewsFetchService;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.blog.service.support.NewsAggregationService;
+import com.example.blog.service.support.dto.NewsAggregationResult;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import javax.annotation.Resource;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 /**
- * Guardian 新闻抓取服务实现。
+ * 新闻抓取服务实现。
  */
 @Service
 public class GuardianNewsFetchServiceImpl implements GuardianNewsFetchService {
 
-    private static final String SOURCE = "guardian";
     private static final String STATUS_RUNNING = "RUNNING";
     private static final String STATUS_SUCCESS = "SUCCESS";
     private static final String STATUS_FAILED = "FAILED";
@@ -44,153 +37,113 @@ public class GuardianNewsFetchServiceImpl implements GuardianNewsFetchService {
     private GuardianProperties guardianProperties;
 
     @Resource
-    private GuardianApiClient guardianApiClient;
-
-    @Resource
-    private NewsArticleMapper newsArticleMapper;
-
-    @Resource
     private NewsFetchJobLogMapper newsFetchJobLogMapper;
 
     @Resource
-    private NewsClassifier newsClassifier;
+    private NewsAggregationService newsAggregationService;
 
     @Resource
-    private ObjectMapper objectMapper;
+    private List<NewsProviderAdapter> newsProviderAdapters;
 
     /**
      * 执行一次新闻抓取任务。
      *
      * @param fetchDate 抓取日期
      * @param triggerType 触发方式
+     * @param providerCode 指定数据源编码，传空表示抓取全部启用数据源
      * @return 抓取结果
      */
     @Override
-    public Map<String, Object> fetchNews(LocalDate fetchDate, String triggerType) {
+    public Map<String, Object> fetchNews(LocalDate fetchDate, String triggerType, String providerCode) {
         LocalDate targetDate = fetchDate != null ? fetchDate : LocalDate.now();
         String safeTriggerType = StringUtils.hasText(triggerType) ? triggerType : "MANUAL";
-        NewsFetchJobLog jobLog = createJobLog(targetDate, safeTriggerType);
+        List<NewsProviderAdapter> targetAdapters = selectTargetAdapters(providerCode);
 
-        if (!guardianProperties.isEnabled()) {
-            return skipJob(jobLog, "Guardian 新闻抓取未启用");
-        }
-        if (!StringUtils.hasText(guardianProperties.getApiKey())) {
-            return skipJob(jobLog, "未配置 Guardian API Key");
-        }
-        if (TRIGGER_SCHEDULED.equalsIgnoreCase(safeTriggerType) && hasSuccessfulScheduledJob(targetDate)) {
-            return skipJob(jobLog, "当天的定时抓取已成功执行，跳过重复任务");
-        }
-
-        int requestCount = 0;
-        int insertedCount = 0;
-        int updatedCount = 0;
-        int failedCount = 0;
-        LinkedHashMap<String, GuardianSearchResponse.ResultItem> uniqueResults = new LinkedHashMap<>();
-
-        try {
-            List<String> queries = guardianProperties.getQueries() == null
-                    ? new ArrayList<>()
-                    : guardianProperties.getQueries();
-
-            // 多个查询词抓回来的结果可能会重复，这里先按 Guardian 内容 ID 去重，
-            // 再统一排序取 Top N，避免同一篇新闻因为命中多个关键词而重复入库。
-            for (String query : queries) {
-                if (!StringUtils.hasText(query)) {
-                    continue;
-                }
-                for (int page = 1; page <= guardianProperties.getMaxPagesPerQuery(); page++) {
-                    GuardianSearchResponse response = guardianApiClient.searchNews(targetDate, query, page);
-                    requestCount++;
-
-                    List<GuardianSearchResponse.ResultItem> results = response != null && response.getResponse() != null
-                            ? response.getResponse().getResults()
-                            : null;
-                    if (results == null || results.isEmpty()) {
-                        break;
-                    }
-
-                    for (GuardianSearchResponse.ResultItem item : results) {
-                        if (item != null && StringUtils.hasText(item.getId())) {
-                            uniqueResults.putIfAbsent(item.getId(), item);
-                        }
-                    }
-
-                    Integer currentPage = response.getResponse().getCurrentPage();
-                    Integer pages = response.getResponse().getPages();
-                    if (currentPage != null && pages != null && currentPage >= pages) {
-                        break;
-                    }
-                    if (uniqueResults.size() >= guardianProperties.getTopLimit()) {
-                        break;
-                    }
-
-                    // Guardian 开发者 Key 有调用频率限制，这里主动做节流，避免触发限流导致整批任务失败。
-                    sleepQuietly(guardianProperties.getRequestIntervalMs());
-                }
-
-                if (uniqueResults.size() >= guardianProperties.getTopLimit()) {
-                    break;
-                }
-            }
-
-            List<NewsArticle> articles = uniqueResults.values().stream()
-                    .map(item -> toNewsArticle(item, targetDate))
-                    .filter(article -> StringUtils.hasText(article.getTitle()) && StringUtils.hasText(article.getWebUrl()))
-                    .sorted(Comparator.comparing(NewsArticle::getPublishedAt, Comparator.nullsLast(Comparator.naturalOrder())).reversed())
-                    .limit(guardianProperties.getTopLimit())
-                    .toList();
-
-            for (int index = 0; index < articles.size(); index++) {
-                NewsArticle article = articles.get(index);
-                article.setRankOrder(index + 1);
-                boolean inserted = saveOrUpdateArticle(article);
-                if (inserted) {
-                    insertedCount++;
-                } else {
-                    updatedCount++;
-                }
-            }
-
-            jobLog.setStatus(STATUS_SUCCESS);
-            jobLog.setRequestCount(requestCount);
-            jobLog.setFetchedCount(articles.size());
-            jobLog.setInsertedCount(insertedCount);
-            jobLog.setUpdatedCount(updatedCount);
-            jobLog.setFailedCount(failedCount);
-            jobLog.setFinishedAt(LocalDateTime.now());
-            newsFetchJobLogMapper.updateById(jobLog);
-
-            Map<String, Object> result = new HashMap<>();
-            result.put("status", STATUS_SUCCESS);
-            result.put("jobId", jobLog.getId());
-            result.put("fetchDate", targetDate);
-            result.put("requestCount", requestCount);
-            result.put("fetchedCount", articles.size());
-            result.put("insertedCount", insertedCount);
-            result.put("updatedCount", updatedCount);
-            return result;
-        } catch (Exception exception) {
-            failedCount++;
-            jobLog.setStatus(STATUS_FAILED);
-            jobLog.setRequestCount(requestCount);
-            jobLog.setInsertedCount(insertedCount);
-            jobLog.setUpdatedCount(updatedCount);
-            jobLog.setFailedCount(failedCount);
-            jobLog.setFinishedAt(LocalDateTime.now());
-            jobLog.setErrorMessage(limit(exception.getMessage(), 2000));
-            newsFetchJobLogMapper.updateById(jobLog);
-
+        if (targetAdapters.isEmpty()) {
             Map<String, Object> result = new HashMap<>();
             result.put("status", STATUS_FAILED);
-            result.put("jobId", jobLog.getId());
             result.put("fetchDate", targetDate);
-            result.put("message", exception.getMessage());
+            result.put("message", "未找到可执行的数据源");
+            result.put("providerResults", List.of());
             return result;
         }
+
+        int totalRequestCount = 0;
+        int totalFetchedCount = 0;
+        int totalInsertedCount = 0;
+        int totalUpdatedCount = 0;
+        int totalFailedCount = 0;
+        List<Map<String, Object>> providerResults = new ArrayList<>();
+
+        // 统一遍历所有目标数据源适配器，
+        // 保证后续新增来源时不需要再改抓取主流程。
+        for (NewsProviderAdapter providerAdapter : targetAdapters) {
+            NewsFetchJobLog jobLog = createJobLog(providerAdapter.getProviderCode(), targetDate, safeTriggerType);
+
+            String validationMessage = providerAdapter.validateConfig();
+            if (StringUtils.hasText(validationMessage)) {
+                providerResults.add(skipJob(jobLog, validationMessage));
+                if (providerAdapter.isEnabled()) {
+                    totalFailedCount++;
+                }
+                continue;
+            }
+            if (TRIGGER_SCHEDULED.equalsIgnoreCase(safeTriggerType)
+                    && hasSuccessfulScheduledJob(providerAdapter.getProviderCode(), targetDate)) {
+                providerResults.add(skipJob(jobLog, "当天的定时抓取已经成功执行，跳过重复任务"));
+                continue;
+            }
+
+            try {
+                NewsProviderFetchResult fetchResult = providerAdapter.fetchArticles(targetDate);
+                // 适配器只负责“抓原始数据”，聚合、去重、排序统一交给聚合服务处理。
+                NewsAggregationResult aggregationResult = newsAggregationService.aggregateArticles(
+                        providerAdapter.getProviderCode(),
+                        fetchResult.getArticles(),
+                        targetDate,
+                        guardianProperties.getTopLimit()
+                );
+
+                jobLog.setStatus(STATUS_SUCCESS);
+                jobLog.setRequestCount(fetchResult.getRequestCount());
+                jobLog.setFetchedCount(aggregationResult.getFetchedCount());
+                jobLog.setInsertedCount(aggregationResult.getInsertedCount());
+                jobLog.setUpdatedCount(aggregationResult.getUpdatedCount());
+                jobLog.setFailedCount(aggregationResult.getSkippedCount());
+                jobLog.setFinishedAt(LocalDateTime.now());
+                newsFetchJobLogMapper.updateById(jobLog);
+
+                totalRequestCount += fetchResult.getRequestCount();
+                totalFetchedCount += aggregationResult.getFetchedCount();
+                totalInsertedCount += aggregationResult.getInsertedCount();
+                totalUpdatedCount += aggregationResult.getUpdatedCount();
+                totalFailedCount += aggregationResult.getSkippedCount();
+                providerResults.add(buildProviderResult(jobLog, null));
+            } catch (Exception exception) {
+                totalFailedCount++;
+                jobLog.setStatus(STATUS_FAILED);
+                jobLog.setFinishedAt(LocalDateTime.now());
+                jobLog.setFailedCount(1);
+                jobLog.setErrorMessage(limit(exception.getMessage(), 2000));
+                newsFetchJobLogMapper.updateById(jobLog);
+                providerResults.add(buildProviderResult(jobLog, exception.getMessage()));
+            }
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("status", totalFailedCount > 0 && totalFetchedCount == 0 ? STATUS_FAILED : STATUS_SUCCESS);
+        result.put("fetchDate", targetDate);
+        result.put("requestCount", totalRequestCount);
+        result.put("fetchedCount", totalFetchedCount);
+        result.put("insertedCount", totalInsertedCount);
+        result.put("updatedCount", totalUpdatedCount);
+        result.put("failedCount", totalFailedCount);
+        result.put("providerResults", providerResults);
+        return result;
     }
 
     /**
-     * 分页查询抓取日志。
+     * 分页查询抓取任务日志。
      *
      * @param page 页码
      * @param size 每页数量
@@ -201,9 +154,7 @@ public class GuardianNewsFetchServiceImpl implements GuardianNewsFetchService {
         int safePage = Math.max(page, 1);
         int safeSize = Math.max(size, 1);
 
-        LambdaQueryWrapper<NewsFetchJobLog> countWrapper = new LambdaQueryWrapper<>();
-        Long total = newsFetchJobLogMapper.selectCount(countWrapper);
-
+        Long total = newsFetchJobLogMapper.selectCount(new LambdaQueryWrapper<>());
         List<NewsFetchJobLog> list = newsFetchJobLogMapper.selectList(
                 new LambdaQueryWrapper<NewsFetchJobLog>()
                         .orderByDesc(NewsFetchJobLog::getStartedAt)
@@ -220,15 +171,56 @@ public class GuardianNewsFetchServiceImpl implements GuardianNewsFetchService {
     }
 
     /**
+     * 查询所有数据源状态。
+     *
+     * @return 数据源状态列表
+     */
+    @Override
+    public List<NewsProviderStatusResponse> getProviderStatuses() {
+        return newsProviderAdapters.stream()
+                .map(adapter -> {
+                    NewsProviderStatusResponse response = new NewsProviderStatusResponse();
+                    response.setProviderCode(adapter.getProviderCode());
+                    response.setDisplayName(adapter.getDisplayName());
+                    response.setEnabled(adapter.isEnabled());
+                    String validationMessage = adapter.validateConfig();
+                    response.setConfigValid(!StringUtils.hasText(validationMessage));
+                    response.setMessage(StringUtils.hasText(validationMessage) ? validationMessage : "配置正常");
+                    response.setConfig(adapter.getAdminConfig());
+                    return response;
+                })
+                .toList();
+    }
+
+    /**
+     * 根据数据源编码筛选目标适配器。
+     *
+     * @param providerCode 指定数据源编码
+     * @return 目标适配器列表
+     */
+    private List<NewsProviderAdapter> selectTargetAdapters(String providerCode) {
+        if (!StringUtils.hasText(providerCode)) {
+            // 全量抓取时只执行已启用的数据源，保留禁用实现但不参与调度。
+            return newsProviderAdapters.stream()
+                    .filter(NewsProviderAdapter::isEnabled)
+                    .toList();
+        }
+        return newsProviderAdapters.stream()
+                .filter(adapter -> providerCode.equalsIgnoreCase(adapter.getProviderCode()))
+                .toList();
+    }
+
+    /**
      * 创建一条抓取任务日志。
      *
+     * @param source 数据源编码
      * @param targetDate 抓取日期
      * @param triggerType 触发方式
      * @return 任务日志
      */
-    private NewsFetchJobLog createJobLog(LocalDate targetDate, String triggerType) {
+    private NewsFetchJobLog createJobLog(String source, LocalDate targetDate, String triggerType) {
         NewsFetchJobLog jobLog = new NewsFetchJobLog();
-        jobLog.setSource(SOURCE);
+        jobLog.setSource(source);
         jobLog.setJobDate(targetDate);
         jobLog.setTriggerType(triggerType);
         jobLog.setStatus(STATUS_RUNNING);
@@ -254,25 +246,20 @@ public class GuardianNewsFetchServiceImpl implements GuardianNewsFetchService {
         jobLog.setFinishedAt(LocalDateTime.now());
         jobLog.setErrorMessage(limit(message, 2000));
         newsFetchJobLogMapper.updateById(jobLog);
-
-        Map<String, Object> result = new HashMap<>();
-        result.put("status", STATUS_SKIPPED);
-        result.put("jobId", jobLog.getId());
-        result.put("fetchDate", jobLog.getJobDate());
-        result.put("message", message);
-        return result;
+        return buildProviderResult(jobLog, message);
     }
 
     /**
      * 判断当天是否已有成功的定时任务。
      *
+     * @param source 数据源编码
      * @param targetDate 抓取日期
-     * @return 是否已成功执行
+     * @return true 表示已经成功执行
      */
-    private boolean hasSuccessfulScheduledJob(LocalDate targetDate) {
+    private boolean hasSuccessfulScheduledJob(String source, LocalDate targetDate) {
         Long count = newsFetchJobLogMapper.selectCount(
                 new LambdaQueryWrapper<NewsFetchJobLog>()
-                        .eq(NewsFetchJobLog::getSource, SOURCE)
+                        .eq(NewsFetchJobLog::getSource, source)
                         .eq(NewsFetchJobLog::getJobDate, targetDate)
                         .eq(NewsFetchJobLog::getTriggerType, TRIGGER_SCHEDULED)
                         .eq(NewsFetchJobLog::getStatus, STATUS_SUCCESS)
@@ -281,114 +268,25 @@ public class GuardianNewsFetchServiceImpl implements GuardianNewsFetchService {
     }
 
     /**
-     * 将 Guardian 响应转换为新闻实体。
+     * 组装单个数据源的返回结果。
      *
-     * @param item Guardian 单条结果
-     * @param fetchDate 抓取日期
-     * @return 新闻实体
+     * @param jobLog 任务日志
+     * @param message 附加说明
+     * @return 返回结果
      */
-    private NewsArticle toNewsArticle(GuardianSearchResponse.ResultItem item, LocalDate fetchDate) {
-        NewsArticle article = new NewsArticle();
-        article.setSource(SOURCE);
-        article.setSourceContentId(limit(item.getId(), 255));
-        article.setSectionId(limit(item.getSectionId(), 100));
-        article.setSectionName(limit(item.getSectionName(), 100));
-        article.setPillarId(limit(item.getPillarId(), 100));
-        article.setPillarName(limit(item.getPillarName(), 100));
-        article.setTitle(limit(item.getWebTitle(), 500));
-        article.setSummary(limit(item.getFields() == null ? null : item.getFields().getTrailText(), 5000));
-        article.setContent(item.getFields() == null ? null : item.getFields().getBodyText());
-        article.setAuthor(limit(item.getFields() == null ? null : item.getFields().getByline(), 255));
-        article.setWebUrl(limit(item.getWebUrl(), 500));
-        article.setApiUrl(limit(item.getApiUrl(), 500));
-        article.setThumbnailUrl(limit(item.getFields() == null ? null : item.getFields().getThumbnail(), 500));
-        article.setPublishedAt(parsePublishedAt(item.getWebPublicationDate(), fetchDate));
-        article.setFetchDate(fetchDate);
-        article.setLang("en");
-        article.setStatus(1);
-        article.setRawJson(toRawJson(item));
-
-        NewsClassifier.ClassificationResult classificationResult = newsClassifier.classify(
-                article.getTitle(),
-                article.getSummary(),
-                article.getContent()
-        );
-        article.setCategoryCode(classificationResult.getCategoryCode());
-        article.setCategoryName(classificationResult.getCategoryName());
-        article.setKeywordTags(limit(classificationResult.getMatchedKeywords(), 500));
-        return article;
-    }
-
-    /**
-     * 按来源内容 ID 执行新增或更新。
-     *
-     * @param article 新闻实体
-     * @return true 表示新增，false 表示更新
-     */
-    private boolean saveOrUpdateArticle(NewsArticle article) {
-        NewsArticle existing = newsArticleMapper.selectOne(
-                new LambdaQueryWrapper<NewsArticle>()
-                        .eq(NewsArticle::getSource, article.getSource())
-                        .eq(NewsArticle::getSourceContentId, article.getSourceContentId())
-                        .last("LIMIT 1")
-        );
-        LocalDateTime now = LocalDateTime.now();
-        article.setUpdatedAt(now);
-
-        if (existing == null) {
-            article.setCreatedAt(now);
-            newsArticleMapper.insert(article);
-            return true;
-        }
-
-        article.setId(existing.getId());
-        article.setCreatedAt(existing.getCreatedAt());
-        newsArticleMapper.updateById(article);
-        return false;
-    }
-
-    /**
-     * 解析发布时间。
-     *
-     * @param value 原始发布时间
-     * @param fallbackDate 兜底日期
-     * @return 解析后的时间
-     */
-    private LocalDateTime parsePublishedAt(String value, LocalDate fallbackDate) {
-        try {
-            return StringUtils.hasText(value)
-                    ? OffsetDateTime.parse(value).toLocalDateTime()
-                    : fallbackDate.atStartOfDay();
-        } catch (Exception exception) {
-            return fallbackDate.atStartOfDay();
-        }
-    }
-
-    /**
-     * 序列化原始响应，便于排查问题。
-     *
-     * @param item Guardian 单条结果
-     * @return JSON 字符串
-     */
-    private String toRawJson(GuardianSearchResponse.ResultItem item) {
-        try {
-            return objectMapper.writeValueAsString(item);
-        } catch (JsonProcessingException exception) {
-            return "{}";
-        }
-    }
-
-    /**
-     * 按配置做请求节流。
-     *
-     * @param requestIntervalMs 间隔毫秒数
-     */
-    private void sleepQuietly(int requestIntervalMs) {
-        try {
-            TimeUnit.MILLISECONDS.sleep(Math.max(requestIntervalMs, 0));
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-        }
+    private Map<String, Object> buildProviderResult(NewsFetchJobLog jobLog, String message) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("jobId", jobLog.getId());
+        result.put("source", jobLog.getSource());
+        result.put("status", jobLog.getStatus());
+        result.put("fetchDate", jobLog.getJobDate());
+        result.put("requestCount", jobLog.getRequestCount());
+        result.put("fetchedCount", jobLog.getFetchedCount());
+        result.put("insertedCount", jobLog.getInsertedCount());
+        result.put("updatedCount", jobLog.getUpdatedCount());
+        result.put("failedCount", jobLog.getFailedCount());
+        result.put("message", StringUtils.hasText(message) ? message : jobLog.getErrorMessage());
+        return result;
     }
 
     /**

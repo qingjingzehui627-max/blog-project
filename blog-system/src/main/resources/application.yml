@@ -1,4 +1,6 @@
 spring:
+  config:
+    import: optional:classpath:application-local-secrets.yml
   datasource:
     url: jdbc:mysql://localhost:3306/blog?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8&useUnicode=true
     username: root
@@ -29,7 +31,7 @@ ai:
   enabled: true
   provider: custom
   base-url: https://api.xiaokuizi.online/v1
-  api-key: ${OPENAI_API_KEY}
+  api-key: ""
   model: gpt-5.4
   models:
     - gpt-5.4
@@ -41,12 +43,23 @@ ai:
   daily-limit: 10
   max-history: 10
   timeout-ms: 30000
+  news-summary:
+    enabled: true
+    auto-enabled: true
+    auto-top-limit: 10
+    daily-limit: 50
+    cron: 0 40 6 * * ?
+    zone: Asia/Shanghai
+    temperature: 0.3
+    content-max-length: 2000
+    max-retries: 1
+    prompt-version: news-summary-v1
 
 guardian:
   enabled: true
   base-url: https://content.guardianapis.com
-  # Guardian API Key，建议生产环境通过环境变量 GUARDIAN_API_KEY 配置
-  api-key: e5e3f364-a229-49b5-947c-28f44a9fa8a3
+  # Guardian API Key 建议放在 application-local-secrets.yml 中
+  api-key: ""
   timeout-ms: 20000
   page-size: 50
   top-limit: 100
@@ -72,3 +85,61 @@ guardian:
     - Anthropic
     - Nvidia
     - technology
+
+newsapi:
+  enabled: false
+  base-url: https://newsapi.org/v2
+  # NewsAPI Key 建议放在 application-local-secrets.yml 中
+  api-key: ""
+  timeout-ms: 20000
+  page-size: 100
+  top-limit: 100
+  max-pages-per-query: 1
+  request-interval-ms: 1200
+  language: en
+  sort-by: publishedAt
+  domains:
+    - techcrunch.com
+    - thenextweb.com
+    - theverge.com
+    - wired.com
+    - arstechnica.com
+  queries:
+    - artificial intelligence
+    - machine learning
+    - OpenAI
+    - Anthropic
+    - Nvidia
+    - technology
+
+currents:
+  enabled: true
+  base-url: https://api.currentsapi.services/v1
+  # Currents API Key 建议放在 application-local-secrets.yml 中
+  api-key: ""
+  timeout-ms: 20000
+  page-size: 30
+  top-limit: 100
+  max-pages-per-query: 2
+  request-interval-ms: 1200
+  language: en
+  category: science_technology
+  keywords:
+    - artificial intelligence
+    - machine learning
+    - OpenAI
+    - Anthropic
+    - Nvidia
+    - technology
+
+rss:
+  enabled: true
+  timeout-ms: 15000
+  request-interval-ms: 800
+  top-limit: 100
+  default-language: en
+  feeds:
+    - https://techcrunch.com/feed/
+    - https://www.theverge.com/rss/index.xml
+    - https://www.wired.com/feed/rss
+    - https://feeds.arstechnica.com/arstechnica/technology-lab

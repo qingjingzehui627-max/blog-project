@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS likes (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     user_id BIGINT NOT NULL,
     target_id BIGINT NOT NULL,
-    type VARCHAR(10) NOT NULL, -- post 或 comment
+    type VARCHAR(10) NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS post_tags (
 CREATE TABLE IF NOT EXISTS media_files (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     url VARCHAR(255) NOT NULL,
-    type VARCHAR(10) NOT NULL, -- image 或 video
+    type VARCHAR(10) NOT NULL,
     size BIGINT NOT NULL,
     user_id BIGINT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -86,30 +86,40 @@ CREATE TABLE IF NOT EXISTS media_files (
 );
 
 -- 插入默认分类
-INSERT INTO categories (name) VALUES ('技术'), ('生活'), ('工作'), ('学习') ON DUPLICATE KEY UPDATE name = name;
+INSERT INTO categories (name)
+VALUES ('技术'), ('生活'), ('工作'), ('学习')
+ON DUPLICATE KEY UPDATE name = name;
 
 -- 插入默认标签
-INSERT INTO tags (name) VALUES ('Java'), ('Spring Boot'), ('Vue'), ('MySQL'), ('Redis') ON DUPLICATE KEY UPDATE name = name;
+INSERT INTO tags (name)
+VALUES ('Java'), ('Spring Boot'), ('Vue'), ('MySQL'), ('Redis')
+ON DUPLICATE KEY UPDATE name = name;
 
--- AI tech news aggregation module
+-- 聚合新闻主表
 CREATE TABLE IF NOT EXISTS news_articles (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     source VARCHAR(32) NOT NULL DEFAULT 'guardian',
     source_content_id VARCHAR(255) NOT NULL,
+    primary_provider VARCHAR(32) NOT NULL,
     section_id VARCHAR(100),
     section_name VARCHAR(100),
     pillar_id VARCHAR(100),
     pillar_name VARCHAR(100),
     title VARCHAR(500) NOT NULL,
+    normalized_title VARCHAR(500),
+    title_hash VARCHAR(64),
     summary TEXT,
     content MEDIUMTEXT,
     author VARCHAR(255),
     web_url VARCHAR(500) NOT NULL,
+    normalized_url VARCHAR(500),
+    url_hash VARCHAR(64),
     api_url VARCHAR(500),
     thumbnail_url VARCHAR(500),
     published_at DATETIME NOT NULL,
     fetch_date DATE NOT NULL,
     rank_order INT,
+    source_count INT NOT NULL DEFAULT 1,
     category_code VARCHAR(50) NOT NULL,
     category_name VARCHAR(100) NOT NULL,
     keyword_tags VARCHAR(500),
@@ -118,13 +128,40 @@ CREATE TABLE IF NOT EXISTS news_articles (
     raw_json JSON,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uk_source_content (source, source_content_id),
     KEY idx_fetch_date_rank (fetch_date, rank_order),
     KEY idx_category_date (category_code, fetch_date),
     KEY idx_published_at (published_at),
-    KEY idx_status_published (status, published_at)
+    KEY idx_status_published (status, published_at),
+    KEY idx_fetch_url_hash (fetch_date, url_hash),
+    KEY idx_fetch_title_hash (fetch_date, title_hash)
 );
 
+-- 新闻来源明细表
+CREATE TABLE IF NOT EXISTS news_article_sources (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    article_id BIGINT NOT NULL,
+    provider_code VARCHAR(32) NOT NULL,
+    source_content_id VARCHAR(255) NOT NULL,
+    source_url VARCHAR(500),
+    normalized_url VARCHAR(500),
+    url_hash VARCHAR(64),
+    title VARCHAR(500) NOT NULL,
+    normalized_title VARCHAR(500),
+    title_hash VARCHAR(64),
+    published_at DATETIME NOT NULL,
+    fetch_date DATE NOT NULL,
+    raw_json JSON,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_provider_source_date (provider_code, source_content_id, fetch_date),
+    KEY idx_article_id (article_id),
+    KEY idx_fetch_url_hash (fetch_date, url_hash),
+    KEY idx_fetch_title_hash (fetch_date, title_hash),
+    CONSTRAINT fk_news_article_sources_article
+        FOREIGN KEY (article_id) REFERENCES news_articles(id)
+);
+
+-- 新闻抓取任务日志
 CREATE TABLE IF NOT EXISTS news_fetch_job_log (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     source VARCHAR(32) NOT NULL,
@@ -144,6 +181,29 @@ CREATE TABLE IF NOT EXISTS news_fetch_job_log (
     KEY idx_status_started_at (status, started_at)
 );
 
+-- 新闻 AI 摘要表
+CREATE TABLE IF NOT EXISTS news_ai_summary (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    article_id BIGINT NOT NULL,
+    fetch_date DATE NOT NULL,
+    summary_text TEXT,
+    summary_status VARCHAR(20) NOT NULL,
+    trigger_type VARCHAR(20) NOT NULL,
+    model_name VARCHAR(100),
+    prompt_version VARCHAR(50),
+    generated_at DATETIME,
+    retry_count INT NOT NULL DEFAULT 0,
+    error_message VARCHAR(1000),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_article_id (article_id),
+    KEY idx_fetch_date_status (fetch_date, summary_status),
+    KEY idx_generated_at (generated_at),
+    CONSTRAINT fk_news_ai_summary_article
+        FOREIGN KEY (article_id) REFERENCES news_articles(id)
+);
+
+-- 新闻分类规则表
 CREATE TABLE IF NOT EXISTS news_category_rules (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     category_code VARCHAR(50) NOT NULL,
@@ -157,18 +217,25 @@ CREATE TABLE IF NOT EXISTS news_category_rules (
     UNIQUE KEY uk_category_code (category_code)
 );
 
-INSERT INTO news_category_rules (category_code, category_name, include_keywords, exclude_keywords, priority, enabled)
+INSERT INTO news_category_rules (
+    category_code,
+    category_name,
+    include_keywords,
+    exclude_keywords,
+    priority,
+    enabled
+)
 VALUES
-('MODEL', '大模型', 'openai,gpt,anthropic,claude,gemini,llama,large language model,llm,foundation model', '', 10, 1),
-('RESEARCH', 'AI研究', 'research,paper,benchmark,multimodal,reasoning,agentic,training,alignment', '', 20, 1),
-('CHIP', '算力芯片', 'nvidia,gpu,semiconductor,chip,cuda,datacenter,inference chip', '', 30, 1),
-('PRODUCT', 'AI产品', 'copilot,assistant,chatbot,ai tool,product launch,release', '', 40, 1),
-('POLICY', '政策监管', 'regulation,regulator,law,privacy,copyright,safety,governance', '', 50, 1),
-('STARTUP', '投融资', 'startup,funding,investment,venture capital,acquisition,merger', '', 60, 1),
-('GENERAL_TECH', '科技综合', 'technology,software,cloud,developer,platform,app', '', 90, 1)
+    ('MODEL', '大模型', 'openai,gpt,anthropic,claude,gemini,llama,large language model,llm,foundation model', '', 10, 1),
+    ('RESEARCH', 'AI研究', 'research,paper,benchmark,multimodal,reasoning,agentic,training,alignment', '', 20, 1),
+    ('CHIP', '算力芯片', 'nvidia,gpu,semiconductor,chip,cuda,datacenter,inference chip', '', 30, 1),
+    ('PRODUCT', 'AI产品', 'copilot,assistant,chatbot,ai tool,product launch,release', '', 40, 1),
+    ('POLICY', '政策监管', 'regulation,regulator,law,privacy,copyright,safety,governance', '', 50, 1),
+    ('STARTUP', '投融资', 'startup,funding,investment,venture capital,acquisition,merger', '', 60, 1),
+    ('GENERAL_TECH', '科技综合', 'technology,software,cloud,developer,platform,app', '', 90, 1)
 ON DUPLICATE KEY UPDATE
-category_name = VALUES(category_name),
-include_keywords = VALUES(include_keywords),
-exclude_keywords = VALUES(exclude_keywords),
-priority = VALUES(priority),
-enabled = VALUES(enabled);
+    category_name = VALUES(category_name),
+    include_keywords = VALUES(include_keywords),
+    exclude_keywords = VALUES(exclude_keywords),
+    priority = VALUES(priority),
+    enabled = VALUES(enabled);

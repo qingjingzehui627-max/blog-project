@@ -54,4 +54,14 @@ public interface NewsArticleService {
      * @return 最近抓取日期
      */
     LocalDate getLatestFetchDate();
+
+    /**
+     * 分页查询重复新闻结果。
+     *
+     * @param page 页码
+     * @param size 每页数量
+     * @param fetchDate 抓取日期
+     * @return 重复新闻结果
+     */
+    Map<String, Object> getDuplicateArticles(int page, int size, LocalDate fetchDate);
 }
