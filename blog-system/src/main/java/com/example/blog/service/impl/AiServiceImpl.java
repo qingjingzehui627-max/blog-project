@@ -4,8 +4,12 @@ import com.example.blog.config.AiProperties;
 import com.example.blog.dto.AiChatMessage;
 import com.example.blog.dto.AiChatRequest;
 import com.example.blog.service.AiService;
+import com.example.blog.service.support.RagKnowledgeService;
+import com.example.blog.service.support.dto.RagSearchResult;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -29,9 +33,13 @@ import static org.springframework.http.HttpStatus.BAD_REQUEST;
 import static org.springframework.http.HttpStatus.FORBIDDEN;
 import static org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE;
 
+/**
+ * AI 对话服务实现，负责配额校验、RAG 检索增强和模型调用。
+ */
 @Service
 public class AiServiceImpl implements AiService {
 
+    private static final Logger log = LoggerFactory.getLogger(AiServiceImpl.class);
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<Map<String, Object>>() {
     };
 
@@ -47,6 +55,15 @@ public class AiServiceImpl implements AiService {
     @Resource
     private ObjectMapper objectMapper;
 
+    @Resource
+    private RagKnowledgeService ragKnowledgeService;
+
+    /**
+     * 获取指定用户当前的 AI 调用额度信息。
+     *
+     * @param userId 当前用户 ID
+     * @return 额度信息
+     */
     @Override
     public Map<String, Object> getQuota(Long userId) {
         int used = getUsedCount(userId);
@@ -61,6 +78,13 @@ public class AiServiceImpl implements AiService {
         return result;
     }
 
+    /**
+     * 处理一次 AI 对话请求，并在可用时追加 RAG 检索上下文。
+     *
+     * @param userId 当前用户 ID
+     * @param request 对话请求参数
+     * @return 包含回答、模型和来源信息的结果
+     */
     @Override
     public Map<String, Object> chat(Long userId, AiChatRequest request) {
         ensureEnabled();
@@ -76,35 +100,59 @@ public class AiServiceImpl implements AiService {
         }
 
         String resolvedModel = resolveModel(request == null ? null : request.getModel());
-        String answer = callProvider(message.trim(), request == null ? null : request.getHistory(), resolvedModel);
+        RagSearchResult ragResult = ragKnowledgeService.search(message.trim());
+        String answer = callProvider(message.trim(), request == null ? null : request.getHistory(), resolvedModel, ragResult);
         int currentUsed = incrementUsage(userId);
 
         Map<String, Object> result = new HashMap<>();
         result.put("answer", answer);
         result.put("provider", aiProperties.getProvider());
         result.put("model", resolvedModel);
+        result.put("mode", ragResult.isHasRelevantContext() ? "rag" : "chat");
+        result.put("sources", ragResult.getSources());
         result.put("dailyLimit", dailyLimit);
         result.put("used", currentUsed);
         result.put("remaining", Math.max(0, dailyLimit - currentUsed));
         return result;
     }
 
+    /**
+     * 校验 AI 功能是否已开启。
+     */
     private void ensureEnabled() {
         if (!aiProperties.isEnabled()) {
             throw new ResponseStatusException(SERVICE_UNAVAILABLE, "AI 功能暂未开启");
         }
     }
 
-    private String callProvider(String message, List<AiChatMessage> history, String model) {
+    /**
+     * 根据配置分发请求到对应的大模型提供方。
+     *
+     * @param message 用户问题
+     * @param history 最近的对话历史
+     * @param model 最终解析出的模型名称
+     * @param ragResult 检索结果
+     * @return 模型回答
+     */
+    private String callProvider(String message, List<AiChatMessage> history, String model, RagSearchResult ragResult) {
         String provider = aiProperties.getProvider() == null ? "openai" : aiProperties.getProvider().trim().toLowerCase();
         if ("ollama".equals(provider)) {
-            return callOllama(message, history, model);
+            return callOllama(message, history, model, ragResult);
         }
-        return callOpenAiCompatible(message, history, model);
+        return callOpenAiCompatible(message, history, model, ragResult);
     }
 
-    private String callOpenAiCompatible(String message, List<AiChatMessage> history, String model) {
-        List<Map<String, String>> messages = buildMessages(message, history);
+    /**
+     * 调用兼容 OpenAI 的聊天补全接口。
+     *
+     * @param message 用户问题
+     * @param history 最近的对话历史
+     * @param model 最终解析出的模型名称
+     * @param ragResult 检索结果
+     * @return 模型回答文本
+     */
+    private String callOpenAiCompatible(String message, List<AiChatMessage> history, String model, RagSearchResult ragResult) {
+        List<Map<String, String>> messages = buildMessages(message, history, ragResult);
 
         Map<String, Object> body = new HashMap<>();
         body.put("model", model);
@@ -143,8 +191,17 @@ public class AiServiceImpl implements AiService {
         throw new ResponseStatusException(SERVICE_UNAVAILABLE, "AI 返回内容格式不支持");
     }
 
-    private String callOllama(String message, List<AiChatMessage> history, String model) {
-        List<Map<String, String>> messages = buildMessages(message, history);
+    /**
+     * 调用 Ollama 聊天接口。
+     *
+     * @param message 用户问题
+     * @param history 最近的对话历史
+     * @param model 最终解析出的模型名称
+     * @param ragResult 检索结果
+     * @return 模型回答文本
+     */
+    private String callOllama(String message, List<AiChatMessage> history, String model, RagSearchResult ragResult) {
+        List<Map<String, String>> messages = buildMessages(message, history, ragResult);
 
         Map<String, Object> body = new HashMap<>();
         body.put("model", model);
@@ -161,9 +218,18 @@ public class AiServiceImpl implements AiService {
         return String.valueOf(content).trim();
     }
 
-    private List<Map<String, String>> buildMessages(String message, List<AiChatMessage> history) {
+    /**
+     * 构建最终发送给大模型的消息列表。
+     *
+     * @param message 用户问题
+     * @param history 最近的对话历史
+     * @param ragResult 检索结果
+     * @return 面向不同提供方的消息列表
+     */
+    private List<Map<String, String>> buildMessages(String message, List<AiChatMessage> history, RagSearchResult ragResult) {
         List<Map<String, String>> messages = new ArrayList<>();
         messages.add(createMessage("system", aiProperties.getSystemPrompt()));
+        messages.add(createMessage("system", buildRagInstruction(ragResult)));
 
         if (history != null && !history.isEmpty()) {
             int maxHistory = Math.max(0, aiProperties.getMaxHistory());
@@ -188,6 +254,31 @@ public class AiServiceImpl implements AiService {
         return messages;
     }
 
+    /**
+     * 为当前请求生成 RAG 专用系统提示词。
+     *
+     * @param ragResult 检索结果
+     * @return 系统提示词文本
+     */
+    private String buildRagInstruction(RagSearchResult ragResult) {
+        if (ragResult != null && ragResult.isHasRelevantContext() && !ragResult.getSources().isEmpty()) {
+            return "你现在是网站的 RAG 助手。请优先根据下面检索到的站内文章和新闻内容回答，"
+                    + "不要把未出现在上下文里的站内信息说成已确认事实。"
+                    + "如果上下文不足，请明确说明站内知识库信息不足，再给出谨慎建议。\n\n"
+                    + "检索上下文：\n"
+                    + ragResult.getContextBlock();
+        }
+        return "当前没有检索到足够相关的站内文章或新闻。请先明确说明站内知识库暂未命中，"
+                + "再给出简洁、保守的通用建议。";
+    }
+
+    /**
+     * 创建单条提供方消息结构。
+     *
+     * @param role 对话角色
+     * @param content 消息内容
+     * @return 提供方消息映射
+     */
     private Map<String, String> createMessage(String role, String content) {
         Map<String, String> message = new HashMap<>();
         message.put("role", role);
@@ -195,6 +286,11 @@ public class AiServiceImpl implements AiService {
         return message;
     }
 
+    /**
+     * 创建通用 JSON 请求头。
+     *
+     * @return JSON 请求头
+     */
     private HttpHeaders createJsonHeaders() {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
@@ -202,6 +298,14 @@ public class AiServiceImpl implements AiService {
         return headers;
     }
 
+    /**
+     * 执行 AI 请求并解析返回的 JSON 响应。
+     *
+     * @param url 提供方接口地址
+     * @param body 请求体
+     * @param headers 请求头
+     * @return 解析后的 JSON 数据
+     */
     private Map<String, Object> readJsonResponse(String url, Map<String, Object> body, HttpHeaders headers) {
         ResponseEntity<String> responseEntity = restTemplate.postForEntity(url, new HttpEntity<>(body, headers), String.class);
         String responseBody = responseEntity.getBody();
@@ -232,38 +336,77 @@ public class AiServiceImpl implements AiService {
         }
     }
 
+    /**
+     * 从 Redis 读取当前用户当天的已用次数。
+     * Redis 不可用时降级为 0，避免对话功能整体不可用。
+     *
+     * @param userId 当前用户 ID
+     * @return 已用次数
+     */
     private int getUsedCount(Long userId) {
-        String value = stringRedisTemplate.opsForValue().get(buildQuotaKey(userId));
-        if (value == null || value.isBlank()) {
-            return 0;
-        }
         try {
+            String value = stringRedisTemplate.opsForValue().get(buildQuotaKey(userId));
+            if (value == null || value.isBlank()) {
+                return 0;
+            }
             return Integer.parseInt(value);
         } catch (NumberFormatException error) {
             return 0;
+        } catch (Exception error) {
+            log.warn("读取 AI 配额失败，已按 0 次降级处理，userId={}", userId, error);
+            return 0;
         }
     }
 
+    /**
+     * 增加当前用户当天的使用次数。
+     * Redis 不可用时降级返回 1，保证主流程仍可继续。
+     *
+     * @param userId 当前用户 ID
+     * @return 增加后的次数
+     */
     private int incrementUsage(Long userId) {
-        String key = buildQuotaKey(userId);
-        Long count = stringRedisTemplate.opsForValue().increment(key);
-        if (count != null && count == 1L) {
-            stringRedisTemplate.expire(key, ttlToTomorrow());
+        try {
+            String key = buildQuotaKey(userId);
+            Long count = stringRedisTemplate.opsForValue().increment(key);
+            if (count != null && count == 1L) {
+                stringRedisTemplate.expire(key, ttlToTomorrow());
+            }
+            return count == null ? 0 : count.intValue();
+        } catch (Exception error) {
+            log.warn("写入 AI 配额失败，已按临时次数返回，userId={}", userId, error);
+            return 1;
         }
-        return count == null ? 0 : count.intValue();
     }
 
+    /**
+     * 计算距离下一天零点的剩余时长。
+     *
+     * @return 到明天的剩余时长
+     */
     private Duration ttlToTomorrow() {
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime tomorrow = now.toLocalDate().plusDays(1).atStartOfDay();
         return Duration.between(now, tomorrow);
     }
 
+    /**
+     * 构造指定用户当天的 Redis 限额键。
+     *
+     * @param userId 当前用户 ID
+     * @return Redis 键
+     */
     private String buildQuotaKey(Long userId) {
         LocalDate today = LocalDate.now(ZoneId.systemDefault());
         return "ai:quota:" + today + ":" + userId;
     }
 
+    /**
+     * 去掉提供方基础地址末尾的斜杠。
+     *
+     * @param baseUrl 配置中的基础地址
+     * @return 归一化后的基础地址
+     */
     private String trimTrailingSlash(String baseUrl) {
         if (baseUrl == null || baseUrl.isBlank()) {
             return "";
@@ -275,6 +418,12 @@ public class AiServiceImpl implements AiService {
         return url;
     }
 
+    /**
+     * 根据请求参数和配置解析最终使用的模型名称。
+     *
+     * @param requestedModel 客户端请求的模型名称
+     * @return 最终模型名称
+     */
     private String resolveModel(String requestedModel) {
         List<String> availableModels = aiProperties.getModels();
         if (availableModels == null || availableModels.isEmpty()) {
@@ -291,6 +440,12 @@ public class AiServiceImpl implements AiService {
         return aiProperties.getModel();
     }
 
+    /**
+     * 安全地将对象转换为 Map。
+     *
+     * @param value 源对象
+     * @return 转换后的 Map，不可转换时返回空 Map
+     */
     @SuppressWarnings("unchecked")
     private Map<String, Object> castMap(Object value) {
         if (value instanceof Map) {
@@ -299,6 +454,12 @@ public class AiServiceImpl implements AiService {
         return new HashMap<>();
     }
 
+    /**
+     * 安全地将对象转换为 Map 列表。
+     *
+     * @param value 源对象
+     * @return 转换后的列表，不可转换时返回空列表
+     */
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> castList(Object value) {
         if (value instanceof List) {

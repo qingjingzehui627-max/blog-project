@@ -34,10 +34,7 @@
           {{ post.likeCount ?? 0 }}
         </span>
 
-        <span
-          v-if="post.category"
-          class="rounded bg-slate-100 px-2 py-0.5 text-slate-500"
-        >
+        <span v-if="post.category" class="rounded bg-slate-100 px-2 py-0.5 text-slate-500">
           {{ post.category }}
         </span>
       </div>

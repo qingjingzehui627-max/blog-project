@@ -22,6 +22,8 @@ blog-system/target/
 # Exclude local runtime logs
 blog-frontend/*.log
 blog-system/*.log
+blog-frontend/runlogs/
+blog-system/runlogs/
 
 #服务器配置
 node_modules
