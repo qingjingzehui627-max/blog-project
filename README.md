@@ -1,9 +1,9 @@
 # 📝 Blog System（全栈博客系统）
 
-一个基于 **Vue3 + Spring Boot + MySQL + Redis** 的现代博客系统，支持文章发布、评论互动、图片上传等核心功能。
+一个基于 **Vue3 + Spring Boot + MySQL + Redis** 的现代博客系统，支持文章发布、新闻资讯、AI智能体等核心功能。
 
 ---
-
+# 链接体验地址 https://www.qingjingze.com/
 ## 🚀 项目简介
 
 本项目对标 Medium / CSDN / 掘金，旨在实现一个 **可上线、可扩展的博客平台**，具备完整的前后端架构。
